@@ -1,13 +1,12 @@
 import base64
 import io
 import numpy as np
-import librosa
+import soundfile as sf
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 def compute_mode(arr):
-    # approximate mode for continuous values
     values, counts = np.unique(np.round(arr, 5), return_counts=True)
     return float(values[np.argmax(counts)])
 
@@ -17,18 +16,21 @@ def analyze():
         data = request.get_json()
         audio_base64 = data.get("audio_base64", "")
 
-        # 🔹 Step 1: Decode base64 → audio bytes
+        # 🔹 Fast decode
         audio_bytes = base64.b64decode(audio_base64)
-
-        # 🔹 Step 2: Load audio using librosa
         audio_buffer = io.BytesIO(audio_bytes)
-        y, sr = librosa.load(audio_buffer, sr=None)
 
-        # 🔹 Step 3: If empty audio
+        # 🔹 MUCH faster than librosa
+        y, sr = sf.read(audio_buffer)
+
+        # 🔹 If stereo → convert to mono
+        if len(y.shape) > 1:
+            y = np.mean(y, axis=1)
+
         if len(y) == 0:
             y = np.array([0.0])
 
-        # 🔹 Step 4: Compute statistics
+        # 🔹 Stats
         mean_val = float(np.mean(y))
         std_val = float(np.std(y))
         var_val = float(np.var(y))
@@ -38,7 +40,6 @@ def analyze():
         mode_val = compute_mode(y)
         range_val = float(max_val - min_val)
 
-        # 🔹 Step 5: Build STRICT JSON
         result = {
             "rows": int(len(y)),
             "columns": ["amplitude"],
@@ -57,7 +58,7 @@ def analyze():
 
         return jsonify(result)
 
-    except Exception as e:
+    except Exception:
         return jsonify({
             "rows": 0,
             "columns": [],
@@ -74,6 +75,9 @@ def analyze():
             "correlation": []
         })
 
+@app.route('/')
+def home():
+    return "OK"
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
